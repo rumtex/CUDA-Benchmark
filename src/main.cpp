@@ -49,11 +49,11 @@ void print_result(bool* result) {
 int main(int argc, char const *argv[])
 {
     try {
-        Perceptron P1 ({
+        Perceptron P1({
                 "Знаток \"ИЛИ\"",
-                { 2, 3, 1 },
+                { 2, 4, 1 },
                 .float_generator = random_sign_float_unit_fraction,
-                .validator = validate_result
+                .mode = training_mode_t::arithmetical_mean,
             });
 
         P1.train({

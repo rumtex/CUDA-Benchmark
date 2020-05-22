@@ -21,9 +21,9 @@ typedef float (*vote_fn)(float coefficient, float input);
 enum training_mode_t {
     arithmetical_mean, // ищет среднее арифметическое значение для того чтобы задать нужный коэффициент КАЖДОМУ прошедшему нейрону в равной степени
     arithmetical_mean_v2, // среднее арифметическое с применением коэффициента близости к стороне входящей\исходящей вершины
-    progression_second_layer, // вторым слоем представлена прогрессия от минимума до максимума (и чтото не так по краям)
-    
-}
+    flash_mod, // создаем копию сетки. перебирая веса (или находя по градиентным функциям всяким) устанавливаем самые подходящие состояния, потом сравниваем их по очереди с оригиналом и выбираем вариант по пути наименьшей разницы. находим среднее или пересчитываем все с другой отправной точки
+    backpropagation, // поиск всех ошибочных путей, исправление коэффициентов поштучно
+};
 
 struct PerceptronConfiguration {
     // название персептрона, должно быть уникальным в контексте вызова программы
@@ -38,24 +38,11 @@ struct PerceptronConfiguration {
     // коэффициенты должны быть в диапазоне [-1;1]
     init_train_float_fn     float_generator = random_sign_float_unit_fraction;
 
-    // TODO feature
-    // функция, которая сравнивает результат с ожиданиями
-    // если возвращает false: делает dump в файл [perceptron name].trace
-    result_validate_fn      validator = NULL;
-
     // функция, которая считает "голос" из trained коэффициента и исходных данных, см. docs/three_point_square_progression.ods
     vote_fn                 voter = input_square_progression_modifier;
-};
 
-struct PerceptronData
-{
-    char*           filename;
-    float*          trained_bit_pool;
-    ssize_t         trained_bit_pool_users = 0; // TODO доделать thread-safe
-    ssize_t         trained_bit_pool_size = 0;
-    ssize_t         working_bit_pool_size = 0;
-    size_t          output_size;
-    size_t          input_size;
+    // мод тренировки сети
+    training_mode_t         mode = training_mode_t::arithmetical_mean;
 };
 
 // weight vector
@@ -66,10 +53,17 @@ struct way
     size_t          in_num;
 };
 
-struct TrainData
+struct PerceptronData
 {
-    size_t          iterations = 0;
+    char*           filename;
+    float*          trained_bit_pool;
     bool*           receptions_bit_pool;
+    size_t          train_it_count = 0;
+    ssize_t         trained_bit_pool_users = 0; // TODO доделать thread-safe
+    ssize_t         trained_bit_pool_size = 0;
+    ssize_t         working_bit_pool_size = 0;
+    size_t          output_size;
+    size_t          input_size;
     array<way>      ways;
 };
 
@@ -83,7 +77,6 @@ class Perceptron
 private:
     PerceptronConfiguration     p_config;
     PerceptronData              p_data;
-    TrainData                   p_train_data;
 
 public:
     Perceptron(PerceptronConfiguration p_config);
@@ -91,10 +84,12 @@ public:
 
     bool* run(array<bool> input_data);
 
+    void arithmetical_mean_train(train_data& data);
+
     void train(train_data data);
     void train(array<train_data> data);
 
     void save_trained_state();
     bool is_valid_trained_bits();
-    bool prevent_duplacate_train_data(train_data data);
+    bool prevent_duplicate_train_data(train_data data);
 };
