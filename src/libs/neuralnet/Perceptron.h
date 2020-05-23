@@ -18,11 +18,25 @@ typedef float (*init_train_float_fn)();
 typedef bool (*result_validate_fn)(bool* init_data, bool* result);
 typedef float (*vote_fn)(float coefficient, float input);
 
+// enum work_mode_t {
+//     voiting_average, // ищет среднее арифметическое по результатам голосований на основе f(x)
+//     multiplication_efficient, // перемножает на все коэффициенты
+// };
+
 enum training_mode_t {
+    // тренировочные моды для voiting_average
     arithmetical_mean, // ищет среднее арифметическое значение для того чтобы задать нужный коэффициент КАЖДОМУ прошедшему нейрону в равной степени
     arithmetical_mean_v2, // среднее арифметическое с применением коэффициента близости к стороне входящей\исходящей вершины
     flash_mod, // создаем копию сетки. перебирая веса (или находя по градиентным функциям всяким) устанавливаем самые подходящие состояния, потом сравниваем их по очереди с оригиналом и выбираем вариант по пути наименьшей разницы. находим среднее или пересчитываем все с другой отправной точки
-    backpropagation, // поиск всех ошибочных путей, исправление коэффициентов поштучно
+    av_backpropagation, // поиск всех ошибочных путей, исправление коэффициентов поштучно
+
+    //тренировочные моды для перемножений
+/*
+** Вообще не представляю себе как это может работать частных случаях с нулем. Наверное надо всем +1 в начале..
+** когда нужен инвертирсивный, по большей части, персепшн, нам должен помочь дополнительный единичный вход
+** полные преобразования возможны не менее чем в два слоя и, думаю, только при помощи поиска ошибки
+*/
+    mp_backpropagation, // поиск всех ошибочных путей, исправление коэффициентов поштучно
 };
 
 struct PerceptronConfiguration {
@@ -43,6 +57,8 @@ struct PerceptronConfiguration {
 
     // мод тренировки сети
     training_mode_t         mode = training_mode_t::arithmetical_mean;
+
+    bool                    log_to_json = false;
 };
 
 // weight vector
@@ -85,10 +101,12 @@ public:
     bool* run(array<bool> input_data);
 
     void arithmetical_mean_train(train_data& data);
+    void arithmetical_mean_v2_train(train_data& data);
 
     void train(train_data data);
     void train(array<train_data> data);
 
+    void save_to_json(float* work_state);
     void save_trained_state();
     bool is_valid_trained_bits();
     bool prevent_duplicate_train_data(train_data data);

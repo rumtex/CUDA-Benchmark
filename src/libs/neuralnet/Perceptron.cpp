@@ -70,7 +70,7 @@ Perceptron::Perceptron(PerceptronConfiguration p_config) :
             if (!is_valid_trained_bits()) cv = -1;
             if (cv != -1) {
                 ssize_t recept_bits_count;
-                if (p_config.mode == training_mode_t::backpropagation) {
+                if (p_config.mode == training_mode_t::mp_backpropagation) {
                     // для этого мода не предусмотрено хранение рецептов тренировки
                     recept_bits_count = 0;
                     cv = 0;
@@ -194,14 +194,24 @@ bool* Perceptron::run(array<bool> input_data) {
                 DEBUG_LOG("%svertex #%zu%s, has state: %f\n", blue, cur_vertex_it, normal, w_ptr[cur_vertex_it]);
                 for (size_t out_vertex_it = 0; out_vertex_it < out_layer_size; out_vertex_it++) {
                     DEBUG_LOG("%sedge #%zu%s, has weight: %f\n", yellow, out_vertex_it, normal, t_ptr[out_vertex_it]);
-                    w_ptr[cur_layer_size + out_vertex_it] += p_config.voter(t_ptr[out_vertex_it], w_ptr[cur_vertex_it]);
+
+                    // TODO if тут быть не должно
+                    if (p_config.mode > training_mode_t::av_backpropagation) {
+                        w_ptr[cur_layer_size + out_vertex_it] *= p_config.voter(t_ptr[out_vertex_it], w_ptr[cur_vertex_it]);
+                    } else {
+                        w_ptr[cur_layer_size + out_vertex_it] += p_config.voter(t_ptr[out_vertex_it], w_ptr[cur_vertex_it]);
+                    }
                 }
                 t_ptr += out_layer_size;
             }
             w_ptr += cur_layer_size;
-            for (size_t out_vertex_it = 0; out_vertex_it < out_layer_size; out_vertex_it++) {
-                // DEBUG_LOG("%f/%zu\n", w_ptr[out_vertex_it], cur_layer_size);
-                w_ptr[out_vertex_it] /= cur_layer_size;
+            if (p_config.mode > training_mode_t::av_backpropagation) {
+                // среднее не берем
+            } else {
+                for (size_t out_vertex_it = 0; out_vertex_it < out_layer_size; out_vertex_it++) {
+                    // DEBUG_LOG("%f/%zu\n", w_ptr[out_vertex_it], cur_layer_size);
+                    w_ptr[out_vertex_it] /= cur_layer_size;
+                }
             }
         }
 
@@ -217,6 +227,8 @@ bool* Perceptron::run(array<bool> input_data) {
 
     accuracy /= p_data.output_size;
     LOG("accuracy: %f\n", accuracy);
+
+    save_to_json(work_state);
 
     return result;
 }
@@ -267,10 +279,13 @@ void Perceptron::train(train_data data) {
             arithmetical_mean_train(data);
         break;
         case training_mode_t::arithmetical_mean_v2:
+            arithmetical_mean_v2_train(data);
         break;
         case training_mode_t::flash_mod:
         break;
-        case training_mode_t::backpropagation:
+        case training_mode_t::av_backpropagation:
+        break;
+        case training_mode_t::mp_backpropagation:
         break;
     }
 
@@ -284,6 +299,7 @@ void Perceptron::train(train_data data) {
         *bytes_ptr = data.second.data()[bytes_it++];
 }
 
+// считаем среднее из крайних положений коэффициентов
 void Perceptron::arithmetical_mean_train(train_data& data) {
     float* tb_ptr = p_data.trained_bit_pool;
 
@@ -328,6 +344,144 @@ void Perceptron::arithmetical_mean_train(train_data& data) {
     }
 }
 
+// считаем среднее из крайних положений коэффициентов, но добавили ассиметрию (эффект больше тем, чем входящий бит ближе к краю)
+void Perceptron::arithmetical_mean_v2_train(train_data& data) {
+    float* tb_ptr = p_data.trained_bit_pool;
+
+    for (ssize_t layer_it = 0; layer_it < p_config.layer_sizes.size() - 1; layer_it++) {
+        ssize_t layer_ways_per_brunch = p_data.ways.size() / (p_config.layer_sizes.data()[layer_it] * p_config.layer_sizes.data()[layer_it+1]);
+        tb_ptr += layer_it == 0 ? 0 : p_config.layer_sizes.data()[layer_it] * p_config.layer_sizes.data()[layer_it-1];
+        for (ssize_t from_vertex_it = 0; from_vertex_it < p_config.layer_sizes.data()[layer_it]; from_vertex_it++) {
+            for (ssize_t to_vertex_it = 0; to_vertex_it < p_config.layer_sizes.data()[layer_it+1]; to_vertex_it++) {
+                DEBUG_LOG("l: %zu, vertex_from: %zu, vertex_to: %zu, in_bit: %f\n", layer_it, from_vertex_it, to_vertex_it, tb_ptr[p_config.layer_sizes.data()[layer_it+1] * from_vertex_it + to_vertex_it]);
+                tb_ptr[p_config.layer_sizes.data()[layer_it+1] * from_vertex_it + to_vertex_it]
+                    = (tb_ptr[p_config.layer_sizes.data()[layer_it+1] * from_vertex_it + to_vertex_it] + 1.0) * p_data.train_it_count * layer_ways_per_brunch;
+                DEBUG_LOG("now: %f\n", tb_ptr[p_config.layer_sizes.data()[layer_it+1] * from_vertex_it + to_vertex_it]);
+            }
+        }
+    }
+
+    for (auto way : p_data.ways) {
+        ssize_t layer_it = 0;
+        float coefficient = 1.0 + (data.second.data()[way->out_num] * 1.0) - (data.first.data()[way->in_num] * 1.0);
+        DEBUG_LOG("way: #%zu = %f ==>> #%zu = %f, c: %f\n", way->in_num, (data.first.data()[way->in_num] * 1.0), way->out_num, (data.second.data()[way->out_num] * 1.0), coefficient);
+        for (auto weight : way->weight_ptr) {
+            **weight += coefficient;
+            DEBUG_LOG("weight: %f\n", **weight);
+            layer_it++;
+        }
+    }
+
+    p_data.train_it_count++;
+    tb_ptr = p_data.trained_bit_pool;
+    for (ssize_t layer_it = 0; layer_it < p_config.layer_sizes.size() - 1; layer_it++) {
+        ssize_t layer_ways_per_brunch = p_data.ways.size() / (p_config.layer_sizes.data()[layer_it] * p_config.layer_sizes.data()[layer_it+1]);
+        DEBUG_LOG("layer_ways_per_brunch: %zu\n", layer_ways_per_brunch);
+        tb_ptr += layer_it == 0 ? 0 : p_config.layer_sizes.data()[layer_it] * p_config.layer_sizes.data()[layer_it-1];
+        for (ssize_t from_vertex_it = 0; from_vertex_it < p_config.layer_sizes.data()[layer_it]; from_vertex_it++) {
+            for (ssize_t to_vertex_it = 0; to_vertex_it < p_config.layer_sizes.data()[layer_it+1]; to_vertex_it++) {
+                DEBUG_LOG("w:%f/(train_it: %zu * w_p_b: %zu - 1), l: %zu, vertex_from: %zu, vertex_to: %zu\n", tb_ptr[p_config.layer_sizes.data()[layer_it+1] * from_vertex_it + to_vertex_it], p_data.train_it_count, layer_ways_per_brunch, layer_it, from_vertex_it, to_vertex_it);
+                tb_ptr[p_config.layer_sizes.data()[layer_it+1] * from_vertex_it + to_vertex_it]
+                    = tb_ptr[p_config.layer_sizes.data()[layer_it+1] * from_vertex_it + to_vertex_it] / (p_data.train_it_count * layer_ways_per_brunch) - 1.0;
+                DEBUG_LOG("out_bit: %f\n", tb_ptr[p_config.layer_sizes.data()[layer_it+1] * from_vertex_it + to_vertex_it]);
+            }
+        }
+    }
+}
+
+
+constexpr char open_nodes[] = "{\"nodes\":[";
+constexpr int open_nodes_len = sizeof(open_nodes)-1;
+constexpr char open_edges[] = "],\"edges\":[";
+constexpr int open_edges_len = sizeof(open_edges)-1;
+constexpr char close_json[] = "]}\n";
+constexpr int close_len = sizeof(close_json)-1;
+void Perceptron::save_to_json(float* work_state) {
+    if (!p_config.log_to_json) return;
+
+    constexpr char ext[] = ".json";
+    int name_len = strlen(p_config.name);
+
+    char* filename = new char[name_len + strlen(ext) + 5];
+    std::memcpy(filename, p_config.name, name_len);
+
+    int file_counter = 0;
+    struct stat buffer;
+
+    while (file_counter != -1) {
+        sprintf(filename+name_len, "%04i\n", file_counter);
+        std::memcpy(filename+name_len+4, ext, strlen(ext) + 1);
+
+        if (stat(filename, &buffer) != 0)
+            break;
+        file_counter++;
+    }
+    DEBUG_LOG("filename: %s\n", filename);
+
+    int fd = open(filename
+    , O_RDWR | O_CREAT
+    , S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+
+
+    ssize_t cv = write(fd, open_nodes, open_nodes_len);
+
+    size_t max_layer_size = 0;
+    for (auto layer_size : p_config.layer_sizes) {
+        if (*layer_size > max_layer_size) max_layer_size = *layer_size;
+    }
+
+    char buf[512];
+    size_t layer_it = 0;
+
+    float* work_state_ptr = (float*)work_state;
+    for (auto layer_size : p_config.layer_sizes) {
+        for (size_t vertex_it = 0; vertex_it < *layer_size; vertex_it++) {
+            sprintf(buf, "{\"id\":\"l%zuv%zu\",\"label\":\"%f\",\"x\":%f,\"y\":%f,\"size\":1}%s",
+                layer_it, vertex_it, work_state_ptr[vertex_it], 1.0 * layer_it, 1.0 * ((vertex_it + 1.0) / (*layer_size + 1.0)) * max_layer_size, ((layer_it + 1 == p_config.layer_sizes.size()) && (vertex_it + 1) == *layer_size) ? "\0" : ",\0");
+            cv += pwrite(fd, buf, strlen(buf), cv);
+        }
+        layer_it++;
+        work_state_ptr += *layer_size;
+    }
+
+    cv += pwrite(fd, open_edges, open_edges_len, cv);
+
+    float* train_state_ptr = (float*)p_data.trained_bit_pool;
+    size_t out_layer_size = 0, cur_layer_size = 0;
+    layer_it = 0;
+    for (auto layer_size : p_config.layer_sizes) {
+        out_layer_size = *layer_size;
+        if (cur_layer_size == 0) { // первый слой
+        } else {
+            for (size_t cur_vertex_it = 0; cur_vertex_it < cur_layer_size; cur_vertex_it++) {
+                for (size_t out_vertex_it = 0; out_vertex_it < out_layer_size; out_vertex_it++) {
+                    DEBUG_LOG("%sedge #%zu%s, has weight: %f\n", yellow, out_vertex_it, normal, train_state_ptr[out_vertex_it]);
+                    sprintf(buf, "{\"id\":\"e%zu-%zu-%zu\",\"source\":\"l%zuv%zu\",\"target\":\"l%zuv%zu\",\"label\":\"%f\"}%s",
+                        layer_it, cur_vertex_it, out_vertex_it,
+                        layer_it - 1, cur_vertex_it, layer_it, out_vertex_it,
+                        train_state_ptr[out_vertex_it],
+                        (layer_it + 1 == p_config.layer_sizes.size()) && (cur_vertex_it + 1 == cur_layer_size) && (out_vertex_it + 1 == out_layer_size) ? "\0" : ",\0");
+                    cv += pwrite(fd, buf, strlen(buf), cv);
+                }
+                train_state_ptr += out_layer_size;
+            }
+        }
+
+        layer_it++;
+        cur_layer_size = out_layer_size;
+    }
+
+    cv = pwrite(fd, close_json, close_len, cv);
+
+    if (cv == -1) {
+        ERROR((std::string("Can't save perceptron state to ") + p_data.filename).c_str());
+    } else {
+        LOG("SAVED log (%s)\n", filename);
+    }
+
+    close(fd);
+}
+
 void Perceptron::save_trained_state() {
     int config_fd = open(p_data.filename
     , O_RDWR | O_CREAT
@@ -341,7 +495,7 @@ void Perceptron::save_trained_state() {
     sum += cv;
 
     if (cv != -1)
-        cv += pwrite(config_fd, p_data.receptions_bit_pool, (p_data.input_size + p_data.output_size) * p_data.train_it_count, p_data.trained_bit_pool_size + sizeof(size_t));
+        cv = pwrite(config_fd, p_data.receptions_bit_pool, (p_data.input_size + p_data.output_size) * p_data.train_it_count, p_data.trained_bit_pool_size + sizeof(size_t));
     sum += cv;
 
     if (cv == -1) {

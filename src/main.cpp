@@ -51,9 +51,10 @@ int main(int argc, char const *argv[])
     try {
         Perceptron P1({
                 "Знаток \"ИЛИ\"",
-                { 2, 4, 1 },
+                { 2, 3, 1 },
                 .float_generator = random_sign_float_unit_fraction,
                 .mode = training_mode_t::arithmetical_mean,
+                .log_to_json = true,
             });
 
         P1.train({
@@ -71,11 +72,6 @@ int main(int argc, char const *argv[])
     } catch (const char* err) {
         ERROR(err);
     }
-
-    // float y = .0;
-    // for (float it = -1; it < 1.01; it += 0.05) {
-    //     printf("f(%f), y=%f\t = %f\n", it, y, input_square_progression_modifier(it, y));
-    // }
 
     return 0;
 }
