@@ -7,6 +7,11 @@ char average_char(char a, char b) {
         (b & 1));
 }
 
+float mod(float num) {
+    unsigned dd = ((*((unsigned*)&num) << 1) >> 1);
+    return *((float*) &dd);
+}
+
 float input_square_progression_modifier(float coefficient, float y) {
     if (coefficient < 0)
         return -((pow(-coefficient, 1.3) * y) + (1-y)) + 1;

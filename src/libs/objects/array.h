@@ -59,14 +59,14 @@ public:
         a_data((T*) valloc(size * sizeof(T))),
         a_end((T*)((long)a_data + size * sizeof(T)))
     {
-        DEBUG_LOG("[array] allocated %zu bytes memory block (%zu x %zu bytes) from #%p to #%p\n", size * sizeof(T), size, sizeof(T), a_data, a_end);
+        // DEBUG_LOG("[array] allocated %zu bytes memory block (%zu x %zu bytes) from #%p to #%p\n", size * sizeof(T), size, sizeof(T), a_data, a_end);
     };
     array(std::initializer_list<T> list) :
         a_size(list.size()),
         a_data((T*) valloc(list.size() * sizeof(T))),
         a_end((T*)((long)a_data + list.size() * sizeof(T)))
     {
-        DEBUG_LOG("[array] allocated %zu bytes memory block (%zu x %zu bytes) from #%p to #%p with initializer_list\n", list.size() * sizeof(T), list.size(), sizeof(T), a_data, a_end);
+        // DEBUG_LOG("[array] allocated %zu bytes memory block (%zu x %zu bytes) from #%p to #%p with initializer_list\n", list.size() * sizeof(T), list.size(), sizeof(T), a_data, a_end);
         iterator it{a_data};
         for (auto item : list) {
             it = item;
@@ -78,7 +78,7 @@ public:
         a_data(ptr),
         a_end((T*)((long)ptr + size * sizeof(T)))
     {
-        DEBUG_LOG("[array] initialized array from #%p to #%p (%zu x %zu bytes)\n", ptr, a_end, a_size, sizeof(T));
+        // DEBUG_LOG("[array] initialized array from #%p to #%p (%zu x %zu bytes)\n", ptr, a_end, a_size, sizeof(T));
     };
 
     ~array() = default;

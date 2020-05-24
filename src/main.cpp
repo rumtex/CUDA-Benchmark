@@ -51,9 +51,9 @@ int main(int argc, char const *argv[])
     try {
         Perceptron P1({
                 "Знаток \"ИЛИ\"",
-                { 2, 3, 1 },
+                { 2, 4, 7, 6, 1 },
                 .float_generator = random_sign_float_unit_fraction,
-                .mode = training_mode_t::arithmetical_mean,
+                .mode = training_mode_t::arithmetical_mean_v2,
                 .log_to_json = true,
             });
 

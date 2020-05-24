@@ -61,10 +61,19 @@ struct PerceptronConfiguration {
     bool                    log_to_json = false;
 };
 
+struct edge
+{
+    float*          weight_ptr;
+    size_t          out_num;
+    size_t          in_num;
+    // специальный коэффициент, выражающий качество связи между двумя вершинами (в средем по слою дадут единицу)
+    float           length;
+};
+
 // weight vector
 struct way
 {
-    array<float*>   weight_ptr;
+    array<edge>     edges;
     size_t          out_num;
     size_t          in_num;
 };
@@ -78,6 +87,7 @@ struct PerceptronData
     ssize_t         trained_bit_pool_users = 0; // TODO доделать thread-safe
     ssize_t         trained_bit_pool_size = 0;
     ssize_t         working_bit_pool_size = 0;
+    size_t          max_layer_size = 0;
     size_t          output_size;
     size_t          input_size;
     array<way>      ways;
