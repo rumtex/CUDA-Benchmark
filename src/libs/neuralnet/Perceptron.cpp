@@ -8,29 +8,47 @@ ssize_t calc_ways(PerceptronConfiguration& p_config) {
     return ways;
 }
 
-Perceptron::Perceptron(PerceptronConfiguration p_config) :
-    p_config{p_config},
+Perceptron::Perceptron(PerceptronConfiguration p_init_config) :
+    p_config{
+        // memory leak fix нынче так выглядит
+        .name = p_init_config.name,
+        .layer_sizes = (p_init_config.layer_sizes.size()),
+        .mode = p_init_config.mode,
+        .log_to_json = p_init_config.log_to_json,
+    },
     p_data{
-        .ways = {calc_ways(p_config)}
+        .ways = {calc_ways(p_init_config)},
+        .layers = (p_init_config.layer_sizes.size() - 1)
     }
 {
     // reserve mem blocks
     {
         size_t prev_layer_size = 0;
 
+        // p_config.layer_sizes = {2,1};//p_init_config.layer_sizes;
+
         DEBUG_LOG("initialize perceptron configuration...\n"
                 "layers count: %zu\n"
                 "layers size: ", p_config.layer_sizes.size());
 
-        for (auto layer_size : p_config.layer_sizes) {
+        size_t layer_sizes_it = 0;
+        for (auto layer_size : p_init_config.layer_sizes) {
+            if (layer_sizes_it != p_config.layer_sizes.size() - 1)
+                p_data.layers.data()[layer_sizes_it].vertex_count = *layer_size;
+            if (layer_sizes_it != 0)
+                p_data.layers.data()[layer_sizes_it - 1].out_vertex_count = *layer_size;
             if (*layer_size <= 0) throw "Perceptron config: count vertexes must be positive";
+            p_config.layer_sizes.data()[layer_sizes_it++] = *layer_size;
             if (*layer_size > p_data.max_layer_size) p_data.max_layer_size = *layer_size;
             p_data.working_bit_pool_size += *layer_size * float_size;
             if (prev_layer_size != 0 )
-                p_data.trained_bit_pool_size += *layer_size * float_size * prev_layer_size;
+                p_data.trained_bytes_count += *layer_size * prev_layer_size;
             prev_layer_size = *layer_size;
             DEBUG_LOG("%zu ", *layer_size);
         }
+
+        p_data.trained_bit_pool_size = p_data.trained_bytes_count * float_size;
+
         DEBUG_LOG("\n"
             "trained_bit_pool_size: %zu\n"
             "working_bit_pool_size: %zu\n"
@@ -38,7 +56,7 @@ Perceptron::Perceptron(PerceptronConfiguration p_config) :
 
         p_data.input_size = **p_config.layer_sizes.begin();
         p_data.output_size = prev_layer_size;
-        p_data.trained_bit_pool = (float*) valloc(p_data.trained_bit_pool_size);
+        p_data.trained_bit_pool = (weight*) calloc(p_data.trained_bit_pool_size, 1);
     }
 
     // name && saved condition file
@@ -72,16 +90,17 @@ Perceptron::Perceptron(PerceptronConfiguration p_config) :
             if (!is_valid_trained_bits()) cv = -1;
             if (cv != -1) {
                 ssize_t recept_bits_count;
-                if (p_config.mode == training_mode_t::mp_backpropagation) {
-                    // для этого мода не предусмотрено хранение рецептов тренировки
+                if (false) {
+                    // TODO когда может быть не предусмотрено хранение рецептов тренировки
                     recept_bits_count = 0;
                     cv = 0;
                 } else {
                     recept_bits_count = (p_data.input_size + p_data.output_size) * p_data.train_it_count;
-                    p_data.receptions_bit_pool = (bool*)valloc(recept_bits_count);
+                    p_data.receptions_bit_pool = (bool*)calloc(recept_bits_count, 1);
                     cv = pread(config_fd, p_data.receptions_bit_pool, recept_bits_count+1, cv);
                     // DEBUG_LOG("Load %zu from file\n", cv);
                 }
+
                 if (cv == recept_bits_count) {
                     LOG("Load trained state from file: %s\n", p_data.filename);
                     LOG("trained by %zu/%e receptions v%f\n", p_data.train_it_count, pow(p_data.input_size, 2), p_data.train_it_count / pow(p_data.input_size, 2));
@@ -99,12 +118,12 @@ Perceptron::Perceptron(PerceptronConfiguration p_config) :
         if (cv == -1) {
             LOG("Initialize random trained state\n");
             p_data.train_it_count = 0;
-            p_data.receptions_bit_pool = (bool*)valloc(0);
+            p_data.receptions_bit_pool = (bool*)calloc(0, 1);
             ssize_t it = 0;
-            float* ptr;
+            weight* ptr;
             while (it < p_data.trained_bit_pool_size) {
                 ptr = p_data.trained_bit_pool + (it/float_size);
-                *ptr = p_config.float_generator();
+                *ptr = weight(0.,-.2,0.,1.);
 
                 // DEBUG_LOG("it: %zu, num %f\n", it, *(float*)(p_data.trained_bit_pool + (it/float_size)));
                 it += float_size;
@@ -121,70 +140,9 @@ Perceptron::Perceptron(PerceptronConfiguration p_config) :
             vertex_it[it] = 0;
         }
 
-        float* layers_ptrs[way_length];
+        weight* layers_ptrs[way_length];
         for (size_t it = 0; it < way_length; it++) {
             layers_ptrs[it] = (it == 0 ? p_data.trained_bit_pool : layers_ptrs[it - 1] + p_config.layer_sizes.data()[it] * p_config.layer_sizes.data()[it - 1]);
-        }
-
-        struct layer_data
-        {
-            float*          vertexes_y;
-            array<size_t*>  vertexes_y_diff_order;
-        };
-
-        array<layer_data> layers_data(p_config.layer_sizes.size());
-        size_t layer_it = 0;
-        // считаем игреки
-        for (auto layer_data : layers_data) {
-            DEBUG_LOG("layer size: %zu\n", p_config.layer_sizes.data()[layer_it]);
-            layer_data->vertexes_y = new float[p_config.layer_sizes.data()[layer_it]];
-            layer_data->vertexes_y_diff_order = *(new array<size_t*>(p_config.layer_sizes.data()[layer_it]));
-
-            for (size_t vertex_it = 0; vertex_it < p_config.layer_sizes.data()[layer_it]; vertex_it++) {
-                layer_data->vertexes_y[vertex_it] = 1.0 * ((vertex_it + 1.0) / (p_config.layer_sizes.data()[layer_it] + 1.0)) * p_data.max_layer_size;
-                DEBUG_LOG("l: %zu, %f\t", layer_it, layer_data->vertexes_y[vertex_it]);
-
-                // и заодно создаем массивы с порядковыми номерами (близости)
-                if (layer_it + 1 != p_config.layer_sizes.size()) {
-                    layer_data->vertexes_y_diff_order.data()[vertex_it] = new size_t[p_config.layer_sizes.data()[layer_it+1]];
-                }
-            }
-            DEBUG_LOG("\n");
-            layer_it++;
-        }
-
-        // сортируем разницу по Y
-        layer_it = 0;
-        for (auto layer_data : layers_data) {
-            if (layer_it + 1 == layers_data.size()) break;
-            auto* out_layer_data = &layers_data.data()[layer_it + 1];
-            for (size_t cur_vertex_it = 0; cur_vertex_it < p_config.layer_sizes.data()[layer_it]; cur_vertex_it++) {
-                float cur_y = layer_data->vertexes_y[cur_vertex_it];
-                // DEBUG_LOG("cur_y: %f\n", cur_y);
-
-                for (size_t out_vertex_it = 0; out_vertex_it < p_config.layer_sizes.data()[layer_it+1]; out_vertex_it++) {
-                    layer_data->vertexes_y_diff_order.data()[cur_vertex_it][out_vertex_it] = out_vertex_it;
-                }
-
-                for (size_t out_vertex_it_a = 0; out_vertex_it_a < p_config.layer_sizes.data()[layer_it+1]; out_vertex_it_a++) {
-                    for (size_t out_vertex_it_b = 0; out_vertex_it_b < p_config.layer_sizes.data()[layer_it+1]; out_vertex_it_b++) {
-                        float a = out_layer_data->vertexes_y[layer_data->vertexes_y_diff_order.data()[cur_vertex_it][out_vertex_it_a]];
-                        float b = out_layer_data->vertexes_y[layer_data->vertexes_y_diff_order.data()[cur_vertex_it][out_vertex_it_b]];
-                        if (layer_data->vertexes_y_diff_order.data()[cur_vertex_it][out_vertex_it_a] > layer_data->vertexes_y_diff_order.data()[cur_vertex_it][out_vertex_it_b]
-                            && mod(cur_y - a) < mod(cur_y - b)) {
-                            // DEBUG_LOG("l: %zu, from %zu to %zu(%f) < %zu(%f)\n", layer_it, cur_vertex_it, layer_data->vertexes_y_diff_order.data()[cur_vertex_it][out_vertex_it_a], mod(cur_y - a), layer_data->vertexes_y_diff_order.data()[cur_vertex_it][out_vertex_it_b], mod(cur_y - b));
-                            size_t c = layer_data->vertexes_y_diff_order.data()[cur_vertex_it][out_vertex_it_a];
-                            layer_data->vertexes_y_diff_order.data()[cur_vertex_it][out_vertex_it_a] = layer_data->vertexes_y_diff_order.data()[cur_vertex_it][out_vertex_it_b];
-                            layer_data->vertexes_y_diff_order.data()[cur_vertex_it][out_vertex_it_b] = c;
-                        }
-                    }
-                }
-
-                for (size_t out_vertex_it = 0; out_vertex_it < p_config.layer_sizes.data()[layer_it+1]; out_vertex_it++) {
-                    // DEBUG_LOG("l: %zu, from %zu to %zu #%zu:%f\n", layer_it, cur_vertex_it, out_vertex_it, layer_data->vertexes_y_diff_order.data()[cur_vertex_it][out_vertex_it], mod(cur_y - out_layer_data->vertexes_y[layer_data->vertexes_y_diff_order.data()[cur_vertex_it][out_vertex_it]]));
-                }
-            }
-            layer_it++;
         }
 
         for (auto way : p_data.ways) {
@@ -192,22 +150,14 @@ Perceptron::Perceptron(PerceptronConfiguration p_config) :
             ssize_t layer_it = 0;
             // DEBUG_LOG("way: ");
             for (auto edge : way->edges) {
-                edge->weight_ptr = (float*) layers_ptrs[layer_it] + vertex_it[layer_it]*p_config.layer_sizes.data()[layer_it+1] + vertex_it[layer_it + 1];
+                edge->weight_ptr = (weight*) layers_ptrs[layer_it] + vertex_it[layer_it]*p_config.layer_sizes.data()[layer_it+1] + vertex_it[layer_it + 1];
                 edge->in_num = vertex_it[layer_it];
                 edge->out_num = vertex_it[layer_it + 1];
 
-                size_t out_length_num = 0;
-                for (; out_length_num < p_config.layer_sizes.data()[layer_it+1]; out_length_num++) {
-                    if (edge->out_num == layers_data.data()[layer_it].vertexes_y_diff_order.data()[edge->in_num][out_length_num]) break;
-                }
-
-                edge->length = 1.0 * (p_config.layer_sizes.data()[layer_it+1] - out_length_num) * (2.0 / (1.0 + p_config.layer_sizes.data()[layer_it+1]));
-
-                // DEBUG_LOG("(%zu-%zu,%f) ", edge->in_num, edge->out_num, edge->length);
-                // DEBUG_LOG("layer: %zi (size: %zu), vertex_from: %zu, vertex_to: %zu, prepend %zu, w: %f, length: %f\n",
+                // DEBUG_LOG("layer: %zi (size: %zu), vertex_from: %zu, vertex_to: %zu, prepend %zu, w: %f\n",
                 //     layer_it, p_config.layer_sizes.data()[layer_it],
                 //     vertex_it[layer_it], vertex_it[layer_it + 1],
-                //     vertex_it[layer_it]*p_config.layer_sizes.data()[layer_it+1], *edge->weight_ptr, edge->length);
+                //     vertex_it[layer_it]*p_config.layer_sizes.data()[layer_it+1], *edge->weight_ptr);
                 layer_it++;
             }
             // DEBUG_LOG("\n");
@@ -226,6 +176,8 @@ Perceptron::Perceptron(PerceptronConfiguration p_config) :
             }
         }
     }
+
+    init_train_vars();
 }
 
 Perceptron::~Perceptron()
@@ -246,68 +198,175 @@ bool* Perceptron::run(array<bool> input_data) {
     }
     DEBUG_LOG("\n");
 
-    static bool* result = (bool*)valloc(p_data.output_size); // sizeof(bool) == 1
+    if (p_data.input_size != input_data.size()) throw "bad input bytes count";
 
-    float* work_state = (float*)valloc(p_data.working_bit_pool_size);
-    float accuracy = .0;
+    float input[input_data.size()];
+    float output[p_data.output_size];
+    size_t input_size = 0;
+    for (auto byte : input_data) {
+        input[input_size++] = *byte ? 1.0 : 0.0;
+    }
+
+    run(input, output);
+
+    // может обновить в этом месте переменную, до того как код, который этот персептрон использует, её прочитает :)
+    // TODO подумать и исправить
+    bool result[p_data.output_size];
+
+    for (size_t out_vertex_it = 0; out_vertex_it < p_data.output_size; out_vertex_it++) {
+        result[out_vertex_it] = (output[out_vertex_it] > 0.5 ? true : false);
+        // accuracy += result[out_vertex_it] ? output[out_vertex_it] : 1.0 - output[out_vertex_it];
+        DEBUG_LOG("%zu. result bit %s%f%s, round for %i\n", out_vertex_it, green, output[out_vertex_it], normal, (output[out_vertex_it] > 0.5 ? 1 : 0));
+    }
+
+    return result;
+}
+
+void Perceptron::init_train_vars() {
+    for (auto layer : p_data.layers) {
+        // создаем массив для общего объема голосов
+        layer->voters_volume = (float*) calloc(layer->out_vertex_count, sizeof(float));
+    }
+    update_train_vars();
+}
+
+void Perceptron::update_train_vars() {
+    weight* t_ptr = p_data.trained_bit_pool;
+    for (auto layer : p_data.layers) {
+        for (size_t out_vertex_it = 0; out_vertex_it < layer->out_vertex_count; out_vertex_it++) {
+            layer->voters_volume[out_vertex_it] = 0.;
+        }
+        for (size_t cur_vertex_it = 0; cur_vertex_it < layer->vertex_count; cur_vertex_it++) {
+            for (size_t out_vertex_it = 0; out_vertex_it < layer->out_vertex_count; out_vertex_it++) {
+                layer->voters_volume[out_vertex_it] += t_ptr[out_vertex_it].a / 255.0f;
+            }
+            t_ptr += layer->out_vertex_count;
+        }
+    }
+}
+
+void Perceptron::run(float* input, float* output) {
+    float* work_state = (float*)calloc(p_data.working_bit_pool_size, 1);
+
     float* w_ptr = work_state;
-    float* t_ptr = p_data.trained_bit_pool;
+    weight* t_ptr = p_data.trained_bit_pool;
     size_t layer_it = 0, out_layer_size, cur_layer_size = 0;
 
-    for (auto layer_size : p_config.layer_sizes) {
-        out_layer_size = *layer_size;
-        if (cur_layer_size == 0) { // первый слой
-            if (*layer_size != input_data.size()) throw "bad input bytes count";
-            size_t input_size = 0;
-            for (auto byte : input_data) {
-                w_ptr[input_size++] = *byte ? 1.0 : 0.0;
-            }
-        } else {
-            // DEBUG_LOG("%slayer #%zu%s, vertexes: %zu\n", red, layer_it - 1, normal, cur_layer_size);
-            for (size_t cur_vertex_it = 0; cur_vertex_it < cur_layer_size; cur_vertex_it++) {
-                // DEBUG_LOG("%svertex #%zu%s, has state: %f\n", blue, cur_vertex_it, normal, w_ptr[cur_vertex_it]);
-                for (size_t out_vertex_it = 0; out_vertex_it < out_layer_size; out_vertex_it++) {
-                    // DEBUG_LOG("%sedge #%zu%s, has weight: %f\n", yellow, out_vertex_it, normal, t_ptr[out_vertex_it]);
+    for (size_t vertex_it = 0; vertex_it < p_data.input_size; vertex_it++)
+        w_ptr[vertex_it] = input[vertex_it];
 
-                    // TODO if тут быть не должно
-                    if (p_config.mode > training_mode_t::av_backpropagation) {
-                        w_ptr[cur_layer_size + out_vertex_it] *= p_config.voter(t_ptr[out_vertex_it], w_ptr[cur_vertex_it]);
-                    } else {
-                        w_ptr[cur_layer_size + out_vertex_it] += p_config.voter(t_ptr[out_vertex_it], w_ptr[cur_vertex_it]);
-                    }
-                }
-                t_ptr += out_layer_size;
+    for (auto layer : p_data.layers) {
+        out_layer_size = layer->out_vertex_count;
+        cur_layer_size = layer->vertex_count;
+
+        // DEBUG_LOG("%slayer #%zu%s, vertexes: %zu\n", red, layer_it, normal, cur_layer_size);
+        // DEBUG_LOG("%sstage 1: voting%s\n", red, normal);
+
+        // в начале проходим по исходящим вершинам и голосуем за увеличение-уменьшение по квадратичной функции
+        for (size_t cur_vertex_it = 0; cur_vertex_it < cur_layer_size; cur_vertex_it++) {
+            // DEBUG_LOG("%svertex #%zu%s, has state: %f\n", blue, cur_vertex_it, normal, w_ptr[cur_vertex_it]);
+            for (size_t out_vertex_it = 0; out_vertex_it < out_layer_size; out_vertex_it++) {
+
+                float vote = input_square_progression_modifier(char_to_float(t_ptr[out_vertex_it].r), w_ptr[cur_vertex_it]);
+                // DEBUG_LOG("%sedge #%zu%s (r %f, g: %f, b: %f) with a %f, vote (%f+%f) to %f\n", yellow, out_vertex_it, normal, char_to_float(t_ptr[out_vertex_it].r), char_to_float(t_ptr[out_vertex_it].g), char_to_float(t_ptr[out_vertex_it].b), t_ptr[out_vertex_it].a / 255.0f, vote, (t_ptr[out_vertex_it].g < 128 && t_ptr[out_vertex_it].g != 0) ? char_to_float(t_ptr[out_vertex_it].g) * (0.5 - vote)/0.5 : 0.f, w_ptr[cur_layer_size + out_vertex_it]);
+                if (t_ptr[out_vertex_it].g < 128 && // это значит, что мы инвертируем до голосования
+                    t_ptr[out_vertex_it].g != 0) vote += char_to_float(t_ptr[out_vertex_it].g) * (0.5 - vote)/0.5;
+                w_ptr[cur_layer_size + out_vertex_it] += (t_ptr[out_vertex_it].a / 255.0f) * vote;
             }
-            w_ptr += cur_layer_size;
-            if (p_config.mode > training_mode_t::av_backpropagation) {
-                // среднее не берем
-            } else {
-                for (size_t out_vertex_it = 0; out_vertex_it < out_layer_size; out_vertex_it++) {
-                    // DEBUG_LOG("%f/%zu\n", w_ptr[out_vertex_it], cur_layer_size);
-                    w_ptr[out_vertex_it] /= cur_layer_size;
-                }
-            }
+            t_ptr += out_layer_size;
         }
+
+        // считаем среднее арифметическое с коэффициентом
+        w_ptr += cur_layer_size;
+        for (size_t out_vertex_it = 0; out_vertex_it < out_layer_size; out_vertex_it++) {
+            // DEBUG_LOG("delim %f/%f\n", w_ptr[out_vertex_it], layer->voters_volume[out_vertex_it]);
+            w_ptr[out_vertex_it] /= layer->voters_volume[out_vertex_it];
+        }
+
+        // инвертируем число по модулю
+        // DEBUG_LOG("%sstage 2: post-XOR-inversion%s\n", red, normal);
+        w_ptr -= cur_layer_size;
+        t_ptr -= out_layer_size * cur_layer_size;
+        for (size_t cur_vertex_it = 0; cur_vertex_it < cur_layer_size; cur_vertex_it++) {
+            // DEBUG_LOG("%svertex #%zu%s, has state: %f\n", blue, cur_vertex_it, normal, w_ptr[cur_vertex_it]);
+            for (size_t out_vertex_it = 0; out_vertex_it < out_layer_size; out_vertex_it++) {
+                // DEBUG_LOG("%sedge #%zu%s, has weight.g %f\n", yellow, out_vertex_it, normal, char_to_float(t_ptr[out_vertex_it].g));
+
+                if (t_ptr[out_vertex_it].g > 127) {
+                    w_ptr[cur_layer_size + out_vertex_it] = mod(w_ptr[cur_layer_size + out_vertex_it] + char_to_float(t_ptr[out_vertex_it].g));
+                } else continue;
+
+                // DEBUG_LOG("after XOR: %f\n", w_ptr[cur_layer_size + out_vertex_it]);
+            }
+            t_ptr += out_layer_size;
+        }
+        w_ptr += cur_layer_size;
 
         layer_it++;
         cur_layer_size = out_layer_size;
     }
 
     for (size_t out_vertex_it = 0; out_vertex_it < out_layer_size; out_vertex_it++) {
-        result[out_vertex_it] = (w_ptr[out_vertex_it] > 0.5 ? true : false);
-        accuracy += result[out_vertex_it] ? w_ptr[out_vertex_it] : 1.0 - w_ptr[out_vertex_it];
-        DEBUG_LOG("%zu. result bit %s%f%s, round for %i\n", out_vertex_it, green, w_ptr[out_vertex_it], normal, (w_ptr[out_vertex_it] > 0.5 ? 1 : 0));
+        output[out_vertex_it] = w_ptr[out_vertex_it];
     }
 
-    accuracy /= p_data.output_size;
-    LOG("accuracy: %f\n", accuracy);
+    if (p_config.log_to_json && p_data.trained_bit_pool_users == 0)
+        save_to_json(work_state);
 
-    save_to_json(work_state);
-
-    return result;
+    free(work_state);
 }
 
-bool Perceptron::prevent_duplicate_train_data(train_data data) {
+float Perceptron::accuracy_check(train_data& data) {
+    float accuracy = 0.;
+
+    if (p_data.input_size != data.first.size()) throw "bad input bytes count";
+
+    float input[data.first.size()];
+    float output[p_data.output_size];
+    size_t input_size = 0;
+    for (auto byte : data.first) {
+        input[input_size++] = *byte ? 1.0 : 0.0;
+    }
+
+    // подразумеваем, что перед проверкой обновили тренировочные коэффициенты
+    update_train_vars();
+
+    run(input, output);
+
+    // current train
+    for (size_t out_vertex_it = 0; out_vertex_it < p_data.output_size; out_vertex_it++) {
+        // DEBUG_LOG("accuracy %f %i ~ %f\n", output[out_vertex_it], (data.second.data()[out_vertex_it] ? 1 : 0), 1.0 - mod(output[out_vertex_it] - (data.second.data()[out_vertex_it] ? 1. : 0.)));
+        if ((output[out_vertex_it] <= 0.5f && data.second.data()[out_vertex_it])
+            || (output[out_vertex_it] > 0.5f && !data.second.data()[out_vertex_it])) continue;
+        accuracy += 1.0 - mod(output[out_vertex_it] - (data.second.data()[out_vertex_it] ? 1. : 0.));
+    }
+
+    bool* bytes_ptr = (bool*) p_data.receptions_bit_pool;
+    for (size_t train_it_it = 0; train_it_it < p_data.train_it_count; train_it_it++) {
+        input_size = 0;
+
+        for (size_t bytes_it = 0; bytes_it < data.first.size(); bytes_it++)
+            input[input_size++] = bytes_ptr[bytes_it] ? 1.0 : 0.0;
+
+        run(input, output);
+
+        for (size_t bytes_it = 0; bytes_it < p_data.output_size; bytes_it++) {
+            // DEBUG_LOG("accuracy %f %i ~ %f\n", output[bytes_it], (bytes_ptr[p_data.input_size + bytes_it] ? 1 : 0), 1.0 - mod(output[bytes_it] - (bytes_ptr[p_data.input_size + bytes_it] ? 1. : 0.)));
+            if ((output[bytes_it] <= 0.5f && bytes_ptr[p_data.input_size + bytes_it])
+                || (output[bytes_it] > 0.5f && !bytes_ptr[p_data.input_size + bytes_it])) continue;
+            accuracy += 1.0 - mod(output[bytes_it] - (bytes_ptr[p_data.input_size + bytes_it] ? 1. : 0.));
+        }
+
+        bytes_ptr += p_data.input_size + p_data.output_size;
+    }
+
+    // DEBUG_LOG("average accuracy %f/%lu = %f\n", accuracy, p_data.output_size * (p_data.train_it_count + 1), accuracy / (p_data.output_size * (p_data.train_it_count + 1.)));
+    accuracy /= p_data.output_size * (p_data.train_it_count + 1);
+
+    return accuracy;
+}
+
+bool Perceptron::prevent_duplicate_train_data(train_data& data) {
     bool* bytes_ptr = (bool*) p_data.receptions_bit_pool;
     bool not_same;
     for (size_t train_it_it = 0; train_it_it < p_data.train_it_count; train_it_it++) {
@@ -334,40 +393,38 @@ bool Perceptron::prevent_duplicate_train_data(train_data data) {
     return false;
 }
 
-void Perceptron::train(array<train_data> list) {
+void Perceptron::train(std::initializer_list<train_data> list) {
     DEBUG_LOG("train list size: %zu\n", list.size());
-
+    p_data.trained_bit_pool_users++;
     for (auto item : list) {
-        train(*item);
+        train(item);
     }
+    p_data.trained_bit_pool_users--;
 }
 
-void Perceptron::train(train_data data) {
+void Perceptron::train(train_data& data) {
     if (data.first.size() != p_data.input_size || data.second.size() != p_data.output_size) throw "train data format not valid";
 
     if (prevent_duplicate_train_data(data))
         return;
 
     switch (p_config.mode) {
-        case training_mode_t::arithmetical_mean:
-            arithmetical_mean_train(data);
+        case training_mode_t::basic_brute_force:
+            basic_brute_force(data);
         break;
-        case training_mode_t::arithmetical_mean_v2:
-            arithmetical_mean_v2_train(data);
-        break;
-        case training_mode_t::flash_mod:
-        break;
-        case training_mode_t::av_backpropagation:
-        break;
-        case training_mode_t::mp_backpropagation:
+        case training_mode_t::wbw_brute_force:
+            wbw_brute_force(data);
         break;
     }
+
+    update_train_vars();
 
     // добавляем исходные данные тренировки в RAM
     p_data.receptions_bit_pool = (bool*)realloc(p_data.receptions_bit_pool, (p_data.input_size + p_data.output_size) * p_data.train_it_count);
     bool* bytes_ptr = (bool*) p_data.receptions_bit_pool + ((p_data.input_size + p_data.output_size) * (p_data.train_it_count-1));
-    for (size_t bytes_it = 0; bytes_it < data.first.size(); bytes_ptr++)
+    for (size_t bytes_it = 0; bytes_it < data.first.size(); bytes_ptr++) {
         *bytes_ptr = data.first.data()[bytes_it++];
+    }
 
     for (size_t bytes_it = 0; bytes_it < data.second.size(); bytes_ptr++)
         *bytes_ptr = data.second.data()[bytes_it++];
@@ -380,7 +437,6 @@ constexpr int open_edges_len = sizeof(open_edges)-1;
 constexpr char close_json[] = "]}\n";
 constexpr int close_len = sizeof(close_json)-1;
 void Perceptron::save_to_json(float* work_state) {
-    if (!p_config.log_to_json) return;
 
     constexpr char ext[] = ".json";
     int name_len = strlen(p_config.name);
@@ -423,7 +479,7 @@ void Perceptron::save_to_json(float* work_state) {
 
     cv += pwrite(fd, open_edges, open_edges_len, cv);
 
-    float* train_state_ptr = (float*)p_data.trained_bit_pool;
+    weight* train_state_ptr = p_data.trained_bit_pool;
     size_t out_layer_size = 0, cur_layer_size = 0;
     layer_it = 0;
     for (auto layer_size : p_config.layer_sizes) {
@@ -433,10 +489,13 @@ void Perceptron::save_to_json(float* work_state) {
             for (size_t cur_vertex_it = 0; cur_vertex_it < cur_layer_size; cur_vertex_it++) {
                 for (size_t out_vertex_it = 0; out_vertex_it < out_layer_size; out_vertex_it++) {
                     // DEBUG_LOG("%sedge #%zu%s, has weight: %f\n", yellow, out_vertex_it, normal, train_state_ptr[out_vertex_it]);
-                    sprintf(buf, "{\"id\":\"e%zu-%zu-%zu\",\"source\":\"l%zuv%zu\",\"target\":\"l%zuv%zu\",\"label\":\"%f\"}%s",
+                    sprintf(buf, "{\"id\":\"e%zu-%zu-%zu\",\"source\":\"l%zuv%zu\",\"target\":\"l%zuv%zu\",\"label\":\"%0.3f, %0.3f, %0.3f, %0.3f\"}%s",
                         layer_it, cur_vertex_it, out_vertex_it,
                         layer_it - 1, cur_vertex_it, layer_it, out_vertex_it,
-                        train_state_ptr[out_vertex_it],
+                        char_to_float(train_state_ptr[out_vertex_it].r),
+                        char_to_float(train_state_ptr[out_vertex_it].g),
+                        char_to_float(train_state_ptr[out_vertex_it].b),
+                        train_state_ptr[out_vertex_it].a / 255.f,
                         (layer_it + 1 == p_config.layer_sizes.size()) && (cur_vertex_it + 1 == cur_layer_size) && (out_vertex_it + 1 == out_layer_size) ? "\0" : ",\0");
                     cv += pwrite(fd, buf, strlen(buf), cv);
                 }
@@ -484,13 +543,14 @@ void Perceptron::save_trained_state() {
 }
 
 bool Perceptron::is_valid_trained_bits() {
-    for (ssize_t i = 0; i < p_data.trained_bit_pool_size; i += float_size) {
-        // DEBUG_LOG("fnum %f ", p_data.trained_bit_pool[i/float_size]);
-        if (p_data.trained_bit_pool[i/float_size] <= -1.0 || p_data.trained_bit_pool[i/float_size] >= 1.0) {
-            // DEBUG_LOG("not valid\n");
-            return false;
-        }
-        // DEBUG_LOG("is valid\n");
-    }
+    // походу, они не могут быть теперь не валидными, посмотрим
+    // for (ssize_t i = 0; i < p_data.trained_bit_pool_size; i += float_size) {
+    //     // DEBUG_LOG("fnum %f ", p_data.trained_bit_pool[i/float_size]);
+    //     if (p_data.trained_bit_pool[i/float_size] <= -1.0 || p_data.trained_bit_pool[i/float_size] >= 1.0) {
+    //         // DEBUG_LOG("not valid\n");
+    //         return false;
+    //     }
+    //     // DEBUG_LOG("is valid\n");
+    // }
     return true;
 }

@@ -14,29 +14,11 @@ constexpr size_t float_size = sizeof(float);
 
 typedef pair<array<bool>,array<bool>> train_data;
 
-typedef float (*init_train_float_fn)();
 typedef bool (*result_validate_fn)(bool* init_data, bool* result);
-typedef float (*vote_fn)(float coefficient, float input);
-
-// enum work_mode_t {
-//     voiting_average, // ищет среднее арифметическое по результатам голосований на основе f(x)
-//     multiplication_efficient, // перемножает на все коэффициенты
-// };
 
 enum training_mode_t {
-    // тренировочные моды для voiting_average
-    arithmetical_mean, // ищет среднее арифметическое значение для того чтобы задать нужный коэффициент КАЖДОМУ прошедшему нейрону в равной степени
-    arithmetical_mean_v2, // среднее арифметическое с применением коэффициента близости к стороне входящей\исходящей вершины
-    flash_mod, // создаем копию сетки. перебирая веса (или находя по градиентным функциям всяким) устанавливаем самые подходящие состояния, потом сравниваем их по очереди с оригиналом и выбираем вариант по пути наименьшей разницы. находим среднее или пересчитываем все с другой отправной точки
-    av_backpropagation, // поиск всех ошибочных путей, исправление коэффициентов поштучно
-
-    //тренировочные моды для перемножений
-/*
-** Вообще не представляю себе как это может работать частных случаях с нулем. Наверное надо всем +1 в начале..
-** когда нужен инвертирсивный, по большей части, персепшн, нам должен помочь дополнительный единичный вход
-** полные преобразования возможны не менее чем в два слоя и, думаю, только при помощи поиска ошибки
-*/
-    mp_backpropagation, // поиск всех ошибочных путей, исправление коэффициентов поштучно
+    basic_brute_force, // перебираем все возможные варианты, ищем с наименьшей ошибкой
+    wbw_brute_force, // перебираем все возможные варианты, ищем с наименьшей ошибкой
 };
 
 struct PerceptronConfiguration {
@@ -48,26 +30,33 @@ struct PerceptronConfiguration {
     // количественная линейная конфигурация вершин графа
     array<size_t>           layer_sizes;
 
-    // изначально коэффициенты могут быть 0 (оставить без изменений), случайными или в соответствии с особенностями задачи
-    // коэффициенты должны быть в диапазоне [-1;1]
-    init_train_float_fn     float_generator = random_sign_float_unit_fraction;
-
-    // функция, которая считает "голос" из trained коэффициента и исходных данных, см. docs/three_point_square_progression.ods
-    vote_fn                 voter = input_square_progression_modifier;
-
     // мод тренировки сети
-    training_mode_t         mode = training_mode_t::arithmetical_mean;
+    training_mode_t         mode = training_mode_t::basic_brute_force;
 
     bool                    log_to_json = false;
 };
 
+struct weight
+{
+    // weight(char r, char g, char b, char a) : r(r), g(g), b(b), a(a) {}
+    weight(float r, float g, float b, float a) :
+        r(r < 0 ? -r * 127 + 128 : r * 127),
+        g(g < 0 ? -g * 127 + 128 : g * 127),
+        b(b < 0 ? -b * 127 + 128 : b * 127),
+        a(255*a) {}
+
+    unsigned char   r; // коэффициент "увеличить - уменшить - оставить прежним" значение, 0 - оставить прежним, используем квадратичную функцию по 3 точкам
+    unsigned char   g; // коэффициент инверсии
+    unsigned char   b; // умножаем на (256 - b) / 256
+    unsigned char   a; // коэффициент значимости голоса (а они могут быть не равнозначными)
+};
+
 struct edge
 {
-    float*          weight_ptr;
+    weight*         weight_ptr;
     size_t          out_num;
     size_t          in_num;
-    // специальный коэффициент, выражающий качество связи между двумя вершинами (в средем по слою дадут единицу)
-    float           length;
+    float           accuracy; // коэффициент соответствия результата ожиданиям для ветки
 };
 
 // weight vector
@@ -76,21 +65,33 @@ struct way
     array<edge>     edges;
     size_t          out_num;
     size_t          in_num;
+    float           accuracy; // коэффициент соответствия результата ожиданиям для вектора (средний по всем веткам)
 };
+
+struct LayerData
+ {
+    size_t          vertex_count;
+    size_t          out_vertex_count;
+
+    // массив для общего объема голосов (держим в RAM, чтобы не пересчитывать при каждом запуске)
+    float*          voters_volume;
+ };
 
 struct PerceptronData
 {
-    char*           filename;
-    float*          trained_bit_pool;
-    bool*           receptions_bit_pool;
-    size_t          train_it_count = 0;
-    ssize_t         trained_bit_pool_users = 0; // TODO доделать thread-safe
-    ssize_t         trained_bit_pool_size = 0;
-    ssize_t         working_bit_pool_size = 0;
-    size_t          max_layer_size = 0;
-    size_t          output_size;
-    size_t          input_size;
-    array<way>      ways;
+    char*               filename;
+    weight*             trained_bit_pool;
+    bool*               receptions_bit_pool;
+    size_t              train_it_count = 0;
+    ssize_t             trained_bit_pool_users = 0; // TODO доделать thread-safe
+    ssize_t             trained_bit_pool_size = 0;
+    ssize_t             trained_bytes_count = 0;
+    ssize_t             working_bit_pool_size = 0;
+    size_t              max_layer_size = 0;
+    size_t              output_size;
+    size_t              input_size;
+    array<way>          ways;
+    array<LayerData>    layers;
 };
 
 /* Персептрон
@@ -108,16 +109,22 @@ public:
     Perceptron(PerceptronConfiguration p_config);
     ~Perceptron();
 
+    void init_train_vars();
+    void update_train_vars();
+
     bool* run(array<bool> input_data);
+    void run(float* input, float* output);
 
-    void arithmetical_mean_train(train_data& data);
-    void arithmetical_mean_v2_train(train_data& data);
+    float accuracy_check(train_data& data);
+    bool prevent_duplicate_train_data(train_data& data);
 
-    void train(train_data data);
-    void train(array<train_data> data);
+    void basic_brute_force(train_data& data);
+    void wbw_brute_force(train_data& data);
+
+    void train(train_data& data);
+    void train(std::initializer_list<train_data> list);
 
     void save_to_json(float* work_state);
     void save_trained_state();
     bool is_valid_trained_bits();
-    bool prevent_duplicate_train_data(train_data data);
 };

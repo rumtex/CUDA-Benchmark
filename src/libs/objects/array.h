@@ -10,8 +10,8 @@ template <typename T>
 class array
 {
     ssize_t  a_size;
-    T*      a_data;
-    T*      a_end;
+    T*       a_data;
+    T*       a_end;
 
     struct iterator
     {
@@ -56,14 +56,14 @@ class array
 public:
     array(ssize_t size) :
         a_size(size),
-        a_data((T*) valloc(size * sizeof(T))),
+        a_data((T*) calloc(size, sizeof(T))),
         a_end((T*)((long)a_data + size * sizeof(T)))
     {
         // DEBUG_LOG("[array] allocated %zu bytes memory block (%zu x %zu bytes) from #%p to #%p\n", size * sizeof(T), size, sizeof(T), a_data, a_end);
     };
     array(std::initializer_list<T> list) :
         a_size(list.size()),
-        a_data((T*) valloc(list.size() * sizeof(T))),
+        a_data((T*) calloc(list.size(), sizeof(T))),
         a_end((T*)((long)a_data + list.size() * sizeof(T)))
     {
         // DEBUG_LOG("[array] allocated %zu bytes memory block (%zu x %zu bytes) from #%p to #%p with initializer_list\n", list.size() * sizeof(T), list.size(), sizeof(T), a_data, a_end);
@@ -73,15 +73,17 @@ public:
             it++;
         }
     };
-    array(ssize_t size, T* ptr) :
-        a_size(size),
-        a_data(ptr),
-        a_end((T*)((long)ptr + size * sizeof(T)))
-    {
-        // DEBUG_LOG("[array] initialized array from #%p to #%p (%zu x %zu bytes)\n", ptr, a_end, a_size, sizeof(T));
-    };
-
-    ~array() = default;
+    // array(ssize_t size, T* ptr) :
+    //     a_size(size),
+    //     a_data(ptr),
+    //     a_end((T*)((long)ptr + size * sizeof(T)))
+    // {
+    //     DEBUG_LOG("[array] initialized array from #%p to #%p (%zu x %zu bytes)\n", ptr, a_end, a_size, sizeof(T));
+    // };
+    ~array() {
+        free(a_data);
+        // DEBUG_LOG("[~array] destroy (%zu x %zu bytes)\n", a_size, sizeof(T));
+    }
 
     ssize_t size() {
         return a_size;
