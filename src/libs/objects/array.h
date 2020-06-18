@@ -1,15 +1,10 @@
 #include <libs/utils/logger.h>
 #include <cstring>
 
-struct S {
-    explicit (S)(const S&);    // error in C++20, OK in C++17
-    explicit (operator int)(); // error in C++20, OK in C++17
-};
-
 template <typename T>
 class array
 {
-    ssize_t  a_size;
+    size_t  a_size;
     T*       a_data;
     T*       a_end;
 
@@ -51,10 +46,15 @@ class array
         {
             return value != end;
         }
+
+        bool operator !=(iterator end) const
+        {
+            return value != *end;
+        }
     };
 
 public:
-    array(ssize_t size) :
+    array(size_t size) :
         a_size(size),
         a_data((T*) calloc(size, sizeof(T))),
         a_end((T*)((long)a_data + size * sizeof(T)))
@@ -85,7 +85,7 @@ public:
         // DEBUG_LOG("[~array] destroy (%zu x %zu bytes)\n", a_size, sizeof(T));
     }
 
-    ssize_t size() {
+    size_t size() {
         return a_size;
     }
 
@@ -93,12 +93,17 @@ public:
         return a_data;
     }
 
+    void set_new(T* ptr) {
+        free(a_data);
+        a_data = ptr;
+    }
+
     iterator begin() const {
         return iterator{a_data};
     }
 
-    T* end() const {
-        return a_end;
+    iterator end() const {
+        return iterator{a_end};
     }
 
 };

@@ -8,32 +8,27 @@ enum t_value {
     a
 };
 
-constexpr char arrow_up[] = "\033[A";
-
 // считаем среднее из крайних положений коэффициентов
-void Perceptron::wbw_brute_force(train_data& data) {
+void Perceptron::wbw_brute_force() {
     DEBUG_LOG("Perceptron::wbw_brute_force\n");
-if (p_data.train_it_count != 3) {
-    p_data.train_it_count++;
-    return;
-}
+
     weight* best_trained_bit_pool = (weight*) calloc(p_data.trained_bit_pool_size, 1);
     weight* tb_ptr;
     char upper_symbols[p_data.trained_bytes_count * (sizeof(arrow_up) - 1) + 1];
-    for (size_t bytes_it = 0; bytes_it < p_data.trained_bytes_count  + 2; bytes_it++) {
+    for (size_t bytes_it = 0; bytes_it < p_data.trained_bytes_count  + 1; bytes_it++) {
         std::memcpy(&upper_symbols[bytes_it * (sizeof(arrow_up) - 1)], arrow_up, sizeof(arrow_up) - 1);
         upper_symbols[(bytes_it+1) * (sizeof(arrow_up) - 1)] = '\0';
         DEBUG_LOG("\n");
     }
 
     bool not_good_accuracy = true;
-    float best_accuracy = .0;//accuracy_check(data);
+    float best_accuracy = .0;//accuracy_check();
     std::memcpy(best_trained_bit_pool, p_data.trained_bit_pool, p_data.trained_bit_pool_size);
 
     tb_ptr = p_data.trained_bit_pool;
-    for (ssize_t bytes_it = 0; bytes_it < p_data.trained_bytes_count; bytes_it++) {
-        tb_ptr->r = 74;
-            tb_ptr->g = 255;
+    for (size_t bytes_it = 0; bytes_it < p_data.trained_bytes_count; bytes_it++) {
+        tb_ptr->r = 0;
+        tb_ptr->g = 0;
         // if (bytes_it == 0) {
         // } else {
         //     tb_ptr->g = 0;
@@ -49,11 +44,11 @@ if (p_data.train_it_count != 3) {
     t_value current_value = t_value::a;
     weight best_weight(0,0,0,0);
     float best_weight_accuracy = 0., last_circle_accuracy = 0.;
-    ssize_t weight_it = 0;
+    size_t weight_it = 0;
     bool circle_effect = false, hidpi = false;
 
     while (not_good_accuracy) {
-        float cur_accuracy = accuracy_check(data);
+        float cur_accuracy = accuracy_check();
 
         // return;
         if (last_circle_accuracy < cur_accuracy) {
@@ -169,11 +164,10 @@ switch_value:
         }
 
         tb_ptr = p_data.trained_bit_pool;
-        for (ssize_t bytes_it = 0; bytes_it < p_data.trained_bytes_count; bytes_it++) {
+        for (size_t bytes_it = 0; bytes_it < p_data.trained_bytes_count; bytes_it++) {
             DEBUG_LOG("(r:%hhu g:%hhu a:%hhu)              \n", tb_ptr->r, tb_ptr->g, tb_ptr->a);
             tb_ptr++;
         }
-        DEBUG_LOG("\n");
 
         train_it++;
         if (wtrain_it > 2000
@@ -190,43 +184,4 @@ switch_value:
 
     std::memcpy(p_data.trained_bit_pool, best_trained_bit_pool, p_data.trained_bit_pool_size);
 
-    p_data.train_it_count++;
 }
-
-    // for (ssize_t layer_it = 0; layer_it < p_config.layer_sizes.size() - 1; layer_it++) {
-    //     ssize_t layer_ways_per_brunch = p_data.ways.size() / (p_config.layer_sizes.data()[layer_it] * p_config.layer_sizes.data()[layer_it+1]);
-    //     tb_ptr += layer_it == 0 ? 0 : p_config.layer_sizes.data()[layer_it] * p_config.layer_sizes.data()[layer_it-1];
-    //     for (ssize_t from_vertex_it = 0; from_vertex_it < p_config.layer_sizes.data()[layer_it]; from_vertex_it++) {
-    //         for (ssize_t to_vertex_it = 0; to_vertex_it < p_config.layer_sizes.data()[layer_it+1]; to_vertex_it++) {
-    //             // DEBUG_LOG("l: %zu, vertex_from: %zu, vertex_to: %zu, in_bit: %f\n", layer_it, from_vertex_it, to_vertex_it, tb_ptr[p_config.layer_sizes.data()[layer_it+1] * from_vertex_it + to_vertex_it]);
-    //             // tb_ptr[p_config.layer_sizes.data()[layer_it+1] * from_vertex_it + to_vertex_it].r
-    //             //     = (tb_ptr[p_config.layer_sizes.data()[layer_it+1] * from_vertex_it + to_vertex_it].r + 1.0) * p_data.train_it_count * layer_ways_per_brunch;
-    //             // DEBUG_LOG("now: %f\n", tb_ptr[p_config.layer_sizes.data()[layer_it+1] * from_vertex_it + to_vertex_it]);
-    //         }
-    //     }
-    // }
-
-    // for (auto way : p_data.ways) {
-    //     ssize_t layer_it = 0;
-    //     // float coefficient = 1.0 + (data.second.data()[way->out_num] * 1.0) - (data.first.data()[way->in_num] * 1.0);
-    //     // DEBUG_LOG("way: #%zu = %f ==>> #%zu = %f, c: %f\n", way->in_num, (data.first.data()[way->in_num] * 1.0), way->out_num, (data.second.data()[way->out_num] * 1.0), coefficient);
-    //     for (auto edge : way->edges) {
-    //         // edge->weight_ptr->r += 1;
-    //         // DEBUG_LOG("weight: %f\n", *edge->weight_ptr->r);
-    //         layer_it++;
-    //     }
-    // }
-    // tb_ptr = p_data.trained_bit_pool;
-    // for (ssize_t layer_it = 0; layer_it < p_config.layer_sizes.size() - 1; layer_it++) {
-    //     ssize_t layer_ways_per_brunch = p_data.ways.size() / (p_config.layer_sizes.data()[layer_it] * p_config.layer_sizes.data()[layer_it+1]);
-    //     // DEBUG_LOG("layer_ways_per_brunch: %zu\n", layer_ways_per_brunch);
-    //     tb_ptr += layer_it == 0 ? 0 : p_config.layer_sizes.data()[layer_it] * p_config.layer_sizes.data()[layer_it-1];
-    //     for (ssize_t from_vertex_it = 0; from_vertex_it < p_config.layer_sizes.data()[layer_it]; from_vertex_it++) {
-    //         for (ssize_t to_vertex_it = 0; to_vertex_it < p_config.layer_sizes.data()[layer_it+1]; to_vertex_it++) {
-    //             // DEBUG_LOG("w:%f/(train_it: %zu * w_p_b: %zu - 1), l: %zu, vertex_from: %zu, vertex_to: %zu\n", tb_ptr[p_config.layer_sizes.data()[layer_it+1] * from_vertex_it + to_vertex_it], p_data.train_it_count, layer_ways_per_brunch, layer_it, from_vertex_it, to_vertex_it);
-    //             // tb_ptr[p_config.layer_sizes.data()[layer_it+1] * from_vertex_it + to_vertex_it].r
-    //             //     = tb_ptr[p_config.layer_sizes.data()[layer_it+1] * from_vertex_it + to_vertex_it].r / (p_data.train_it_count * layer_ways_per_brunch) - 1.0;
-    //             // DEBUG_LOG("out_bit: %f\n", tb_ptr[p_config.layer_sizes.data()[layer_it+1] * from_vertex_it + to_vertex_it]);
-    //         }
-    //     }
-    // }
