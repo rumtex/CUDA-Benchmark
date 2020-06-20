@@ -4,9 +4,10 @@
 template <typename T>
 class array
 {
-    size_t  a_size;
-    T*       a_data;
-    T*       a_end;
+    size_t      a_size;
+    T*          a_data;
+    T*          a_end;
+    bool        a_preallocated = false;
 
     struct iterator
     {
@@ -61,6 +62,14 @@ public:
     {
         // DEBUG_LOG("[array] allocated %zu bytes memory block (%zu x %zu bytes) from #%p to #%p\n", size * sizeof(T), size, sizeof(T), a_data, a_end);
     };
+    array(size_t size, T* ptr) :
+        a_size(size),
+        a_data(ptr),
+        a_end((T*)((long)ptr + size * sizeof(T))),
+        a_preallocated(true)
+    {
+        // DEBUG_LOG("[array] preallocated %zu bytes memory block (%zu x %zu bytes) from #%p to #%p\n", size * sizeof(T), size, sizeof(T), a_data, a_end);
+    };
     array(std::initializer_list<T> list) :
         a_size(list.size()),
         a_data((T*) calloc(list.size(), sizeof(T))),
@@ -81,7 +90,7 @@ public:
     //     DEBUG_LOG("[array] initialized array from #%p to #%p (%zu x %zu bytes)\n", ptr, a_end, a_size, sizeof(T));
     // };
     ~array() {
-        free(a_data);
+        if (!a_preallocated) free(a_data);
         // DEBUG_LOG("[~array] destroy (%zu x %zu bytes)\n", a_size, sizeof(T));
     }
 

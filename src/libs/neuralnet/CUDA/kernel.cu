@@ -248,11 +248,15 @@ void CUDA_RUN(array<LayerData> &layers, cuda_gpu_device_ptrs& ptrs, size_t work_
 
     for (auto layer : layers) {
         dim3 grid = dim3(layer->out_vertex_count, 1);
-        dim3 blocks = dim3(1, 1);
+        // dim3 blocks = dim3(1, 1);
 
-        run_perception<<<grid, blocks, 0, *stream>>>(d_work_state_ptr, d_work_state_ptr+layer->vertex_count, d_float_train_state_ptr, d_voters_volume_ptr, layer->vertex_count, 0);
 
+        run_layer_perception_stage_1<<<grid, 0, 0, *stream>>>(d_work_state_ptr, d_work_state_ptr+layer->vertex_count, d_float_train_state_ptr, 0);
         d_work_state_ptr += layer->vertex_count;
+
+        run_layer_perception_stage_2<<<layer->out_vertex_count, 0, 0, *stream>>>(d_work_state_ptr, d_float_train_state_ptr, d_voters_volume_ptr, 0);
+        // run_perception<<<grid, blocks, 0, *stream>>>(d_work_state_ptr, d_work_state_ptr+layer->vertex_count, d_float_train_state_ptr, d_voters_volume_ptr, layer->vertex_count, 0);
+
         d_voters_volume_ptr += layer->out_vertex_count;
         d_float_train_state_ptr += layer->vertex_count * layer->out_vertex_count;
     }
@@ -378,8 +382,9 @@ float CUDA_ACCURACY_CHECK(array<LayerData> &layers, cuda_gpu_device_ptrs& ptrs, 
             // DEBUG_LOG("accuracy %.15f %i ~ %.15f\n", output_ptr[bytes_it], (bytes_ptr[input_size + bytes_it] ? 1 : 0), 1.0 - mod(output_ptr[bytes_it] - (bytes_ptr[input_size + bytes_it] ? 1. : 0.)));
             if ((output_ptr[bytes_it] <= 0.5f && bytes_ptr[input_size + bytes_it] == 255)
                 || (output_ptr[bytes_it] > 0.5f && bytes_ptr[input_size + bytes_it] == 0)) {
-                run_accuracy = 0.;
-                break;
+                continue;
+                // run_accuracy = 0.;
+                // break;
             }
             run_accuracy += 1.0 - mod(output_ptr[bytes_it] - bytes_ptr[input_size + bytes_it] / 255.);
 

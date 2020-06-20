@@ -100,7 +100,6 @@ void RUN_MNIST() {
                 "percept_mnist_gpu",
                 {
                     input_size,
-                    input_size,
                     10
                 },
                 .mode = training_mode_t::smart_brute_force,
@@ -114,14 +113,18 @@ void RUN_MNIST() {
         tia_ptr = train_input_array;
         toa_ptr = train_output_array;
         for (unsigned int i = 0; i < number_of_images; i++) {
-            train_data* data = new train_data{input_size, 10};
-            data->first.set_new((unsigned char*) tia_ptr);
-            data->second.set_new((unsigned char*) toa_ptr);
+            train_data* data = new train_data {
+                {input_size, (unsigned char*) tia_ptr},
+                {10, (unsigned char*) toa_ptr}
+            };
+            // data->first.set_new((unsigned char*) tia_ptr);
+            // data->second.set_new((unsigned char*) toa_ptr);
 
             percept_mnist.train(*data);
 
+            delete data;
             tia_ptr += input_size;
-            toa_ptr = toa_ptr + 10;
+            toa_ptr += 10;
         }
 
     } catch (const char* err) {
@@ -144,47 +147,47 @@ int main(int argc, char const *argv[])
     std::chrono::_V2::system_clock::time_point a_time;
     std::chrono::_V2::system_clock::time_point b_time = std::chrono::high_resolution_clock::now();
 
-    // RUN_MNIST();
-    try {
-        size_t input_size = 2;
-        size_t output_size = 1;
+    RUN_MNIST();
+    // try {
+    //     size_t input_size = 2;
+    //     size_t output_size = 1;
 
-        Perceptron P1({
-                "fullstack_double_operator_gpu",
-                { input_size, 40, output_size },
-                .mode = training_mode_t::smart_brute_force,
-                .log_to_json = true,
-                .gpu_num = 0
-            });
+    //     Perceptron P1({
+    //             "fullstack_double_operator_gpu",
+    //             { input_size, 4,3,4, output_size },
+    //             .mode = training_mode_t::smart_brute_force,
+    //             .log_to_json = true,
+    //             .gpu_num = 0
+    //         });
 
 
-        P1.prepare_train(4);
+    //     P1.prepare_train(4);
 
-        P1.train(train_data_bool{{true, true},  {true}});
-        P1.train(train_data_bool{{true, false}, {true}});
-        P1.train(train_data_bool{{false, true}, {true}});
-        P1.train(train_data_bool{{false, false},{false}});
+    //     P1.train(train_data_bool{{true, true},  {true}});
+    //     P1.train(train_data_bool{{true, false}, {true}});
+    //     P1.train(train_data_bool{{false, true}, {true}});
+    //     P1.train(train_data_bool{{false, false},{false}});
 
-        // P1.train({{true, true},  {false, true,   false, true,   false, true,   false, true,   false, true,   false, true,   false, true,   false, true}});
-        // P1.train({{true, false}, {false, false,  true,  true,   false, false,  true,  true,   false, false,  true,  true,   false, false,  true,  true}});
-        // P1.train({{false, true}, {false, false,  false, false,  true,  true,   true,  true,   false, false,  false, false,  true,  true,   true,  true}});
-        // P1.train({{false, false},{false, false,  false, false,  false, false,  false, false,  true,  true,   true,  true,   true,  true,   true,  true}});
+    //     // P1.train({{true, true},  {false, true,   false, true,   false, true,   false, true,   false, true,   false, true,   false, true,   false, true}});
+    //     // P1.train({{true, false}, {false, false,  true,  true,   false, false,  true,  true,   false, false,  true,  true,   false, false,  true,  true}});
+    //     // P1.train({{false, true}, {false, false,  false, false,  true,  true,   true,  true,   false, false,  false, false,  true,  true,   true,  true}});
+    //     // P1.train({{false, false},{false, false,  false, false,  false, false,  false, false,  true,  true,   true,  true,   true,  true,   true,  true}});
 
-        bool* result = (bool*)calloc(output_size, sizeof(bool));
-        P1.run({true, true}, result);
-        print_result(result, output_size);
-        P1.run({true, false}, result);
-        print_result(result, output_size);
-        P1.run({false, true}, result);
-        print_result(result, output_size);
-        P1.run({false, false}, result);
-        print_result(result, output_size);
+    //     bool* result = (bool*)calloc(output_size, sizeof(bool));
+    //     P1.run({true, true}, result);
+    //     print_result(result, output_size);
+    //     P1.run({true, false}, result);
+    //     print_result(result, output_size);
+    //     P1.run({false, true}, result);
+    //     print_result(result, output_size);
+    //     P1.run({false, false}, result);
+    //     print_result(result, output_size);
 
-    //     std::this_thread::sleep_for(std::chrono::seconds(1));
+    // //     std::this_thread::sleep_for(std::chrono::seconds(1));
 
-    } catch (const char* err) {
-        ERROR(err);
-    }
+    // } catch (const char* err) {
+    //     ERROR(err);
+    // }
 
     a_time = std::chrono::high_resolution_clock::now();
     long sec = std::chrono::duration_cast<std::chrono::seconds>(a_time - b_time).count();

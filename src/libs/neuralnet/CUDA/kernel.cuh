@@ -43,7 +43,7 @@ __global__ void run_layer_perception_stage_1(float* in_layer, float* out_layer, 
 
     if (vec->g > 0.) vote += vec->g * (0.5 - vote)/0.5;
 
-    atomicAdd(&out_vertex, vote * vec->a);
+    atomicAdd(&out_vertex, vote * vec->a); // thread safe "+="
     // if (threadIdx.x == 0) printf("blockIdx(x: %d, y: %d, z: %d)(%d;%d;%d)\tthreadIdx(x: %d, y: %d, z: %d)(%d;%d;%d)\n", blockIdx.x, blockIdx.y, blockIdx.z, gridDim.x, gridDim.y, gridDim.z, threadIdx.x, threadIdx.y, threadIdx.z, blockDim.x, blockDim.y, blockDim.z);
 }
 
@@ -66,54 +66,54 @@ __global__ void run_layer_perception_stage_2(float* out_layer, fweight* trained_
     // if (threadIdx.x == 0) printf("blockIdx(x: %d, y: %d, z: %d)(%d;%d;%d)\tthreadIdx(x: %d, y: %d, z: %d)(%d;%d;%d)\n", blockIdx.x, blockIdx.y, blockIdx.z, gridDim.x, gridDim.y, gridDim.z, threadIdx.x, threadIdx.y, threadIdx.z, blockDim.x, blockDim.y, blockDim.z);
 }
 
-__global__ void run_perception(float* in_layer, float* out_layer, fweight* trained_state, float* d_voters_volume, size_t in_count, size_t work_bytes)
-{
-    float& vertex = out_layer[blockIdx.x + blockIdx.y * work_bytes]; //  + blockIdx.y * work_bytes - параллельный запуск
-    vertex = 0.0;
-    fweight* vec;// = &trained_state[in_count * blockIdx.x];
+// __global__ void run_perception(float* in_layer, float* out_layer, fweight* trained_state, float* d_voters_volume, size_t in_count, size_t work_bytes)
+// {
+//     float& vertex = out_layer[blockIdx.x + blockIdx.y * work_bytes]; //  + blockIdx.y * work_bytes - параллельный запуск
+//     vertex = 0.0;
+//     fweight* vec;// = &trained_state[in_count * blockIdx.x];
 
-    vec = &trained_state[blockIdx.x];
-    for (size_t i=0; i < in_count; i++)
-    {
-        size_t it = i + blockIdx.y * work_bytes;
+//     vec = &trained_state[blockIdx.x];
+//     for (size_t i=0; i < in_count; i++)
+//     {
+//         size_t it = i + blockIdx.y * work_bytes;
 
-        // if (blockIdx.y == 0) printf("input_vertex[%lu/%lu], gridDim.x(%d): %f, weight(r: %f, g: %f, b: %f, a: %f) now: %f, %p\n", i+1, in_count, gridDim.x, in_layer[it], vec->r, vec->g, vec->b, vec->a, vertex, &vertex);
+//         // if (blockIdx.y == 0) printf("input_vertex[%lu/%lu], gridDim.x(%d): %f, weight(r: %f, g: %f, b: %f, a: %f) now: %f, %p\n", i+1, in_count, gridDim.x, in_layer[it], vec->r, vec->g, vec->b, vec->a, vertex, &vertex);
 
-        float vote;
-        if (vec->r < 0.0) {
-            vote = -((powf(-vec->r, 1.3) * in_layer[it]) + (1-in_layer[it])) + 1;
-        } else
-        if (vec->r == 0.0) {
-            vote = in_layer[it];
-        } else {
-            vote = (powf(vec->r, 1.3) * (1-in_layer[it]) + in_layer[it]);
-        }
+//         float vote;
+//         if (vec->r < 0.0) {
+//             vote = -((powf(-vec->r, 1.3) * in_layer[it]) + (1-in_layer[it])) + 1;
+//         } else
+//         if (vec->r == 0.0) {
+//             vote = in_layer[it];
+//         } else {
+//             vote = (powf(vec->r, 1.3) * (1-in_layer[it]) + in_layer[it]);
+//         }
 
-        // if (blockIdx.y == 0) printf("stage 1 after %f r = %f vote: %f/%f\n", in_layer[it], vec->r, vote, d_voters_volume[blockIdx.x]);
+//         // if (blockIdx.y == 0) printf("stage 1 after %f r = %f vote: %f/%f\n", in_layer[it], vec->r, vote, d_voters_volume[blockIdx.x]);
 
-        if (vec->g > 0.) vote += vec->g * (0.5 - vote)/0.5;
+//         if (vec->g > 0.) vote += vec->g * (0.5 - vote)/0.5;
 
-        vertex += vote * vec->a;
+//         vertex += vote * vec->a;
 
-        vec += gridDim.x;
-    }
+//         vec += gridDim.x;
+//     }
 
-    vertex /= d_voters_volume[blockIdx.x];
+//     vertex /= d_voters_volume[blockIdx.x];
 
-    vec = &trained_state[blockIdx.x];
-    for (size_t i=0; i < in_count; i++)
-    {
-        if (vec->g < 0.) {
-            // if (blockIdx.y == 0) printf("%f XOR %f = %f\n", vertex, vec->g, fabsf(vertex + vec->g));
-            vertex = fabsf(vertex + vec->g);
-        }
+//     vec = &trained_state[blockIdx.x];
+//     for (size_t i=0; i < in_count; i++)
+//     {
+//         if (vec->g < 0.) {
+//             // if (blockIdx.y == 0) printf("%f XOR %f = %f\n", vertex, vec->g, fabsf(vertex + vec->g));
+//             vertex = fabsf(vertex + vec->g);
+//         }
 
-        vec += gridDim.x;
-    }
+//         vec += gridDim.x;
+//     }
 
-    // if (blockIdx.y == 0) printf("blockIdx(x: %d, y: %d, z: %d),\tthreadIdx(x: %d, y: %d, z: %d)\tidx: %d = %f\n", blockIdx.x, blockIdx.y, blockIdx.z, threadIdx.x, threadIdx.y, threadIdx.z, blockIdx.x, vertex);
+//     // if (blockIdx.y == 0) printf("blockIdx(x: %d, y: %d, z: %d),\tthreadIdx(x: %d, y: %d, z: %d)\tidx: %d = %f\n", blockIdx.x, blockIdx.y, blockIdx.z, threadIdx.x, threadIdx.y, threadIdx.z, blockIdx.x, vertex);
 
-}
+// }
 
 __device__ float d_char_to_float(unsigned char a) {
     return a & MINUS_SIGN_MASK ? (a - 128) / -127.f : a / 127.f;
